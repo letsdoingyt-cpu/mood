@@ -36,7 +36,7 @@ header h1 small{display:block;font-size:13px;color:var(--muted);font-weight:500}
   margin-bottom:10px;overflow:hidden}
 .slot.now{border-color:var(--accent)}
 .sh{display:flex;align-items:center;gap:10px;padding:14px;cursor:pointer;user-select:none}
-.sh .nm{font-weight:650}
+.sh .nm{font-weight:650;white-space:nowrap}
 .sh .tm{color:var(--muted);font-size:13px}
 .sh .sum{margin-left:auto;font-size:14px;color:var(--muted);text-align:right}
 .sh .sum b{color:var(--text)}
@@ -186,7 +186,8 @@ function clear(date,id){
   if (db[date]){ delete db[date][id]; if (!Object.keys(db[date]).length) delete db[date]; }
   save();
 }
-const filled = v => v && (v.mood || v.emotion || v.intensity || (v.note||'').trim());
+const emos = v => !v ? [] : Array.isArray(v.emotions) ? v.emotions : (v.emotion ? [v.emotion] : []);
+const filled = v => v && (v.mood || emos(v).length || v.intensity || (v.note||'').trim());
 
 function render(){
   const [t, sub] = dayTitle(day);
@@ -207,9 +208,9 @@ function render(){
       <div class="sb">
         <div class="lbl"><span>Настроение</span><span>1 — плохо · 10 — отлично</span></div>
         <div class="scale" data-k="mood">${scale(v.mood)}</div>
-        <div class="lbl"><span>Эмоция</span></div>
-        <div class="chips">${EMOTIONS.map(e=>`<button class="${v.emotion===e?'on':''}">${e}</button>`).join('')}</div>
-        <div class="lbl"><span>Сила эмоции</span><span>1 — едва · 10 — накрывает</span></div>
+        <div class="lbl"><span>Эмоции</span><span>можно несколько</span></div>
+        <div class="chips">${EMOTIONS.map(e=>`<button class="${emos(v).includes(e)?'on':''}">${e}</button>`).join('')}</div>
+        <div class="lbl"><span>Сила эмоций</span><span>1 — едва · 10 — накрывает</span></div>
         <div class="scale" data-k="intensity">${scale(v.intensity)}</div>
         <div class="lbl"><span>Как я себя ощущаю</span></div>
         <textarea placeholder="Пара слов: что происходит, почему так…">${esc(v.note||'')}</textarea>
@@ -222,7 +223,8 @@ function render(){
     }));
     el.querySelectorAll('.chips button').forEach(b => b.onclick = () => {
       const e = b.textContent;
-      set(day, s.id, {emotion: (get(day,s.id)||{}).emotion===e ? null : e}); render();
+      const cur = emos(get(day,s.id));
+      set(day, s.id, {emotion: undefined, emotions: cur.includes(e) ? cur.filter(x=>x!==e) : [...cur, e]}); render();
     });
     const ta = el.querySelector('textarea');
     ta.oninput = () => {
@@ -238,7 +240,8 @@ function render(){
 }
 function sumHtml(v, isNow){
   if (!filled(v)) return isNow ? 'сейчас' : '';
-  return `${v.mood?`<b>${v.mood}/10</b>`:''}${v.emotion?`${v.mood?' · ':''}${v.emotion}${v.intensity?' '+v.intensity:''}`:''}${!v.mood&&!v.emotion?'заметка':''}`;
+  const E = emos(v), et = E.length > 2 ? `${E.slice(0,2).join(', ')} +${E.length-2}` : E.join(', ');
+  return `${v.mood?`<b>${v.mood}/10</b>`:''}${et?`${v.mood?' · ':''}${et}${v.intensity?` (${v.intensity})`:''}`:''}${!v.mood&&!et?'заметка':''}`;
 }
 function scale(val){ let h=''; for(let i=1;i<=10;i++) h+=`<button class="${val===i?'on':''}">${i}</button>`; return h; }
 function esc(s){ return s.replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
@@ -277,7 +280,7 @@ function buildTxt(a,b){
   const all = R.flatMap(r=>r.slots.map(x=>x.v));
   const moods = all.map(v=>v.mood).filter(Boolean);
   const cnt = {};
-  all.forEach(v=>{ if(v.emotion){ cnt[v.emotion]=cnt[v.emotion]||{n:0,sum:0,k:0}; cnt[v.emotion].n++; if(v.intensity){cnt[v.emotion].sum+=v.intensity;cnt[v.emotion].k++;} } });
+  all.forEach(v=>emos(v).forEach(e=>{ cnt[e]=cnt[e]||{n:0,sum:0,k:0}; cnt[e].n++; if(v.intensity){cnt[e].sum+=v.intensity;cnt[e].k++;} }));
   const top = Object.entries(cnt).sort((x,y)=>y[1].n-x[1].n)
     .map(([e,c])=>`${e} ×${c.n}${c.k?` (ср. сила ${avg([c.sum/c.k])})`:''}`);
   const bySlot = SLOTS.map(s=>{ const m = R.flatMap(r=>r.slots.filter(x=>x.s.id===s.id).map(x=>x.v.mood)).filter(Boolean); return `${s.name} ${avg(m)??'—'}`; });
@@ -285,7 +288,7 @@ function buildTxt(a,b){
 
   let t = `# Дневник настроения\n`;
   t += `Период: ${a} — ${b} (${days} дн., дней с записями: ${filledDays}, записей: ${all.length})\n`;
-  t += `Шкалы: настроение 1–10 (1 — очень плохо, 10 — отлично); сила эмоции 1–10 (1 — едва заметна, 10 — накрывает).\n`;
+  t += `Шкалы: настроение 1–10 (1 — очень плохо, 10 — отлично); сила эмоций 1–10 (1 — едва заметны, 10 — накрывают); в отрезке может быть несколько эмоций, сила общая.\n`;
   t += `Отрезки суток: ${SLOTS.map(s=>`${s.name} ${slotTime(s)}`).join(', ')}. Ночь после полуночи относится к предыдущей дате.\n\n`;
   t += `## Сводка\n`;
   t += `- Среднее настроение: ${avg(moods)??'—'}${moods.length?` (мин ${Math.min(...moods)}, макс ${Math.max(...moods)})`:''}\n`;
@@ -299,7 +302,7 @@ function buildTxt(a,b){
     for (const {s,v} of r.slots){
       const parts = [];
       parts.push(`настроение ${v.mood?v.mood+'/10':'—'}`);
-      parts.push(`эмоция: ${v.emotion||'—'}${v.intensity?` (сила ${v.intensity}/10)`:''}`);
+      parts.push(`эмоции: ${emos(v).join(', ')||'—'}${v.intensity?` (сила ${v.intensity}/10)`:''}`);
       if ((v.note||'').trim()) parts.push(`заметка: «${v.note.trim().replace(/\s*\n\s*/g,' / ')}»`);
       t += `- ${s.name} ${slotTime(s)}: ${parts.join('; ')}\n`;
     }
@@ -309,14 +312,14 @@ function buildTxt(a,b){
 function buildJson(a,b){
   const R = rows(a,b);
   return JSON.stringify({
-    format:'mood-diary-v1',
+    format:'mood-diary-v2',
     exported: new Date().toISOString(),
     period:{from:a,to:b},
-    scales:{mood:'1-10 (1 очень плохо, 10 отлично)', intensity:'1-10 (1 едва заметна, 10 накрывает)'},
+    scales:{mood:'1-10 (1 очень плохо, 10 отлично)', intensity:'1-10 (1 едва заметны, 10 накрывают), общая для всех эмоций отрезка'},
     slots: SLOTS.map(s=>({id:s.id,name:s.name,time:slotTime(s)})),
     entries: R.flatMap(r=>r.slots.map(({s,v})=>({
       date:r.date, weekday:r.weekday, slot:s.name, slot_id:s.id, time:slotTime(s),
-      mood:v.mood||null, emotion:v.emotion||null, intensity:v.intensity||null, note:(v.note||'').trim()||null
+      mood:v.mood||null, emotions:emos(v), intensity:v.intensity||null, note:(v.note||'').trim()||null
     })))
   }, null, 2);
 }
@@ -365,12 +368,12 @@ document.getElementById('impFile').onchange = async e => {
   const f = e.target.files[0]; if (!f) return;
   try{
     const j = JSON.parse(await f.text());
-    if (j.format!=='mood-diary-v1' || !Array.isArray(j.entries)) throw 0;
+    if (!/^mood-diary-v[12]$/.test(j.format) || !Array.isArray(j.entries)) throw 0;
     let n = 0;
     for (const x of j.entries){
       if (!x.date || !SLOTS.some(s=>s.id===x.slot_id)) continue;
       db[x.date] = db[x.date] || {};
-      db[x.date][x.slot_id] = {mood:x.mood, emotion:x.emotion, intensity:x.intensity, note:x.note||'', updated:new Date().toISOString()};
+      db[x.date][x.slot_id] = {mood:x.mood, emotions: Array.isArray(x.emotions) ? x.emotions : (x.emotion ? [x.emotion] : []), intensity:x.intensity, note:x.note||'', updated:new Date().toISOString()};
       n++;
     }
     save(); render(); refresh(); toast(`Восстановлено записей: ${n}`);
